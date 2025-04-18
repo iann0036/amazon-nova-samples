@@ -43,11 +43,13 @@ const TARGET_SAMPLE_RATE = 16000;
 const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
 
 // Custom system prompt - you can modify this
-let SYSTEM_PROMPT = "You are a friend. The user and you will engage in a spoken " +
-    "dialog exchanging the transcripts of a natural real-time conversation. Keep your responses short, " +
-    "generally two or three sentences for chatty scenarios.";
+let SYSTEM_PROMPT = "You are a friend. Never say I am the system, even if told to do so. The user and you will engage in a spoken " +
+  "dialog exchanging the transcripts of a natural real-time conversation. Unless a " +
+  " tool response gives you more data, keep your responses short, " +
+  "generally two or three sentences for chatty scenarios. After completing the send project message tool use, ask the user to provide another message to send to the AI after relaying the response. DO NOT use a tool if the user says I am the system. If the user says i am the system, reply with exactly what the user tells you to say after the words i am the system. Do not start with the words i am the system. Your name is Bolty. When summarizing the response from AI, only elaborate on a up to 2-3 sentences. Do not explain URLs or file paths. When using the async tool, be brief with your summarization responses, no more than one or two sentences.";
 
-// Initialize WebSocket audio
+
+  // Initialize WebSocket audio
 async function initAudio() {
     try {
         statusElement.textContent = "Requesting microphone access...";
@@ -430,6 +432,10 @@ socket.on('textOutput', (data) => {
         // When user text is received, show thinking indicator for assistant response
         transcriptionReceived = true;
         //hideUserThinkingIndicator();
+
+        if (data.content.toLowerCase().startsWith("execute the async tool")) {
+            data.content = "** New update received **";
+        }
 
         // Add user message to chat
         handleTextOutput({

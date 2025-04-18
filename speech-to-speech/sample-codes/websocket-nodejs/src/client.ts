@@ -26,6 +26,9 @@ import {
   WeatherToolSchema
 } from "./consts";
 
+const fs = require("fs");
+var lastTime = 0;
+
 export interface NovaSonicBidirectionalStreamClientConfig {
   requestHandlerConfig?:
   | NodeHttp2HandlerOptions
@@ -237,7 +240,7 @@ export class NovaSonicBidirectionalStreamClient {
     return new StreamSession(sessionId, this);
   }
 
-  private async processToolUse(toolName: string, toolUseContent: object): Promise<Object> {
+  private async processToolUse(toolName: string, toolUseContent: object, sessionId: string): Promise<Object> {
     const tool = toolName.toLowerCase();
 
     switch (tool) {
@@ -265,6 +268,103 @@ export class NovaSonicBidirectionalStreamClient {
           throw new Error('parsedContent is undefined');
         }
         return this.fetchWeatherData(parsedContent?.latitude, parsedContent?.longitude);
+      case "startq":
+        console.log(`start project tool`);
+        var cp = require("child_process");
+        cp.exec("/Applications/Hyper.app/Contents/MacOS/Hyper");
+        await new Promise(r => setTimeout(r, 2000));
+        var robot = require("robotjs");
+        robot.typeString("cd /tmp; q chat --trust-all-tools 2>&1 | tee /tmp/q-chat.log");
+        robot.keyTap("enter");
+
+        await new Promise(r => setTimeout(r, 1000));
+
+        return {
+          response: "Started an Amazon Q session.",
+          status: "success"
+        };
+      case "sendqmessage":
+        console.log(`send q message tool`);
+        let msg = "";
+        try {
+          if (toolUseContent && typeof (toolUseContent as any).content === 'string') {
+            msg = JSON.parse((toolUseContent as any).content).message;
+          }
+        } catch (error) {
+          return {};
+        }
+
+        if (msg.toLowerCase().startsWith("i am the system")) {
+          msg = msg.replace(/I am the system/i, "");
+          return {
+            message: msg,
+            status: "success"
+          };
+        }
+
+        // truncate file
+        fs.writeFileSync("/tmp/q-chat.log", "");
+
+        var robot = require("robotjs");
+        robot.typeString(msg);
+        robot.keyTap("enter");
+
+        // Read the log file and print its contents
+        async function readLogFile(that: any) {
+          await new Promise(r => setTimeout(r, 1000));
+          lastTime = new Date().getTime();
+
+          let data = "";
+          let rawdata = "";
+          let newdata = "";
+          let newdatanothink = "";
+          while (!rawdata.endsWith(`[3C`)) {
+            try {
+              rawdata = fs.readFileSync("/tmp/q-chat.log", "utf8");
+              newdata = rawdata.replace(/[^a-z0-9\[\]áéíóúñü_-\s\.,]/gim,"").toLowerCase();
+              newdatanothink = newdata.replace(/ thinking/gi, "");
+
+              if (newdatanothink.length < 1 || newdatanothink == data) {
+                // nothing happened
+                console.log("** SKIP 2");
+              } else if (rawdata.endsWith(" Thinking...")){
+                console.log("*** DISPATCHED ***");
+                if ( Math.floor((new Date().getTime() - lastTime)/1000) < 15 ) {
+                    // get from variable
+                } else {
+                    // get from url
+                    lastTime = new Date().getTime();
+                    that.dispatchEvent(sessionId, 'toolResultPartial', {"toolResult": newdata, "toolStillThinking": true});
+                }
+                data = newdatanothink;
+              } else {
+                console.log("** SKIP 1");
+                console.log(data);
+                console.log(newdatanothink);
+              }
+            } catch (err) {
+              console.error(err);
+            }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+
+          that.dispatchEvent(sessionId, 'toolResultPartial', {"toolResult": newdata, "toolStillThinking": false, "isReadyForNewInputs": true});
+        }
+        readLogFile(this);
+
+        return {
+          message: "I'm working on this. Please wait.",
+          status: "success"
+        };
+      case "async":
+        let rawdata = fs.readFileSync("/tmp/q-chat.log", "utf8");
+        let newdata = rawdata.replace(/[^a-z0-9\[\]áéíóúñü_-\s\.,]/gim,"").toLowerCase();
+        let newdatanothink = newdata.replace(/ thinking/gi, "");
+
+        return {
+          rawdata: newdatanothink,
+          status: "success"
+        };
       default:
         console.log(`Tool ${tool} not supported`)
         throw new Error(`Tool ${tool} not supported`);
@@ -534,7 +634,7 @@ export class NovaSonicBidirectionalStreamClient {
                 console.log("calling tooluse");
                 console.log("tool use content : ", session.toolUseContent)
                 // function calling
-                const toolResult = await this.processToolUse(session.toolName, session.toolUseContent);
+                const toolResult = await this.processToolUse(session.toolName, session.toolUseContent, sessionId);
 
                 // Send tool result
                 this.sendToolResult(sessionId, session.toolUseId, toolResult);
@@ -652,6 +752,42 @@ export class NovaSonicBidirectionalStreamClient {
                 description: "Get the current weather for a given location, based on its WGS84 coordinates.",
                 inputSchema: {
                   json: WeatherToolSchema
+                }
+              }
+            },
+            {
+              toolSpec: {
+                name: "startQ",
+                description: "Initiates the creation of a collaborative human<->AI coding project. This tool opens a Terminal and starts Amazon Q, which is used to collaboratively generate a project.",
+                inputSchema: {
+                  json: DefaultToolSchema
+                }
+              }
+            },
+            {
+              toolSpec: {
+                name: "sendQMessage",
+                description: ".",
+                inputSchema: {
+                  json: JSON.stringify({
+                    "type": "object",
+                    "properties": {
+                      "message": {
+                        "type": "string",
+                        "description": "The next message to send to the AI. This tool is used to send messages to the Amazon Q AI in a collaborative coding project. Once a message is sent, the AI will respond with its own message. Ask the user to provide another message to send to the AI after relaying the response.",
+                      }
+                    },
+                    "required": ["message"]
+                  })
+                }
+              }
+            },
+            {
+              toolSpec: {
+                name: "async",
+                description: "Retrieves asyncronous messages. Take the result and summarize it.",
+                inputSchema: {
+                  json: DefaultToolSchema
                 }
               }
             }

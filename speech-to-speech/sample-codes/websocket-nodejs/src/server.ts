@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { fromIni } from "@aws-sdk/credential-providers";
 import { NovaSonicBidirectionalStreamClient } from './client';
 import { Buffer } from 'node:buffer';
+import { randomUUID } from 'node:crypto';
 
 // Configure AWS credentials
 const AWS_PROFILE_NAME = process.env.AWS_PROFILE || 'bedrock-test';
@@ -106,6 +107,20 @@ io.on('connection', (socket) => {
         session.onEvent('streamComplete', () => {
             console.log('Stream completed for client:', socket.id);
             socket.emit('streamComplete');
+        });
+
+        session.onEvent('toolResultPartial', (data) => {
+            // Execute the command to generate the audio file
+            const exec = require('child_process').exec;
+            let fs = require('fs');
+            // say -v Daniel --data-format=LEI16@16000 -o /tmp/test.wav "execute the a-sync tool"
+            fs.readFile("/tmp/test.wav", (err: any, data: Buffer) => {
+                if (err) {
+                    console.log("Error reading audio file:", err);
+                }
+                
+                session.streamAudio(data);
+            });
         });
 
         // Simplified audioInput handler without rate limiting
